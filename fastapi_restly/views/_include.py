@@ -60,9 +60,12 @@ from ._schema_types import (
     _evaluated,
     _is_id_type,
     _is_view_id_param,
+    _path_with_view_id,
     _pydantic_generic_args,
+    _reads_view_id,
     _replace_schema_types,
     _schema_type_in,
+    _view_id_param,
     _view_id_type,
     _without_none,
 )
@@ -370,9 +373,13 @@ def _view_route_args(endpoint: Callable, view_cls: Any) -> tuple[str, dict[str, 
     # cannot be hashed.
     id_type = _view_id_type(view_cls)
     converter = "int" if id_type is int else "uuid" if id_type is UUID else None
+    if _reads_view_id(endpoint, path, view_cls):
+        path = _path_with_view_id(path, view_cls)
     if converter is not None:
         for name, annotation in inspect.get_annotations(endpoint).items():
             if _is_id_type(annotation, endpoint):
+                if name == "id":
+                    name = _view_id_param(view_cls)
                 path = path.replace(f"{{{name}}}", f"{{{name}:{converter}}}")
     return path, route_kwargs
 
@@ -423,6 +430,26 @@ def _route_label(route: fastapi.routing.APIRoute) -> str:
     return f"{route.path_format} ({' '.join(sorted(route.methods))} {route.name})"
 
 
+def _reject_id_param_in_prefix(
+    view_cls: Any, name: str, prefix: str, endpoint: Callable
+) -> None:
+    """Refuse a route that reads the view's id when the prefix has a path
+    parameter with the same name, as in ``/projects/{id}/tasks``. FastAPI
+    refuses the path, and its error does not name the setting."""
+    path = endpoint._api_route_args[0]  # type: ignore[attr-defined]
+    id_param = _view_id_param(view_cls)
+    if not _reads_view_id(endpoint, path, view_cls):
+        return
+    if id_param not in re.findall(r"\{(\w+)", prefix):
+        return
+    raise RestlyConfigurationError(
+        f"{view_cls.__name__}.{name}: the prefix {prefix} has the parameter "
+        f"{{{id_param}}}, and the route {path} reads the id of the view under the "
+        f"same name. Give the parameter of the prefix another name, such as the "
+        f"name of the parent, or set id_param on the view to another name."
+    )
+
+
 def _reject_unread_path_parameter(
     view_cls: Any, name: str, path: str, endpoint: Callable, route: Any
 ) -> None:
@@ -440,10 +467,12 @@ def _reject_unread_path_parameter(
     }
     unread = [found for found in re.findall(r"\{(\w+)", path) if found not in read]
     if unread:
+        id_param = _view_id_param(view_cls)
         raise RestlyConfigurationError(
             f"{view_cls.__name__}.{name}: nothing reads the parameter {unread[0]} of "
-            f"the path {path}. The parameter id reads the query. Write {{id}} in the "
-            f"path, or write the route method with a parameter {unread[0]}."
+            f"the path {path}. The parameter id reads the query. Write "
+            f"{{{id_param}}} in the path, or write the route method with a "
+            f"parameter {unread[0]}."
         )
 
 
@@ -771,6 +800,7 @@ def _init_api_router(view_cls: type[View], tagged: bool = False) -> fastapi.APIR
             continue
         endpoint = attr
         if is_rest_view:
+            _reject_id_param_in_prefix(view_cls, name, prefix, endpoint)
             path, route_kwargs = _view_route_args(endpoint, view_cls)
         else:
             path, route_kwargs = endpoint._api_route_args

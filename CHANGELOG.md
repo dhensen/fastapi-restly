@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `id_param`: the name of the id in the path of the item routes, as in
+  `id_param = "project_id"` for `/projects/{project_id}`. The endpoint methods
+  keep their parameter `id`.
+
 ## [0.14.0] - 2026-11-09
 
 This release adds `SchemaType`, a type that depends on the view,

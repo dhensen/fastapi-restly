@@ -544,6 +544,17 @@ def _check_composite_key(cls: Any) -> None:
             )
 
 
+def _check_id_param(cls: Any) -> None:
+    """Refuse an ``id_param`` that cannot be the name of a path parameter."""
+    id_param = cls.id_param
+    if not isinstance(id_param, str) or not id_param.isidentifier():
+        raise RestlyConfigurationError(
+            f"{cls.__name__}: id_param is {id_param!r}. It is the name of the "
+            f"id in the path, so it must be a Python name, such as "
+            f'"project_id".'
+        )
+
+
 def _check_actions(cls: type) -> None:
     """Refuse a view whose ``Action`` does not inherit from the ``Action`` of
     a base class.
@@ -686,6 +697,14 @@ class BaseRestView(
     #: types. Integer paths accept non-negative digits. An unmatched value
     #: falls through to another route or returns 404, instead of 422.
     id_type: ClassVar[type[Any] | None] = None
+    #: The name of the id parameter in the path of the item routes, such as
+    #: ``"project_id"`` for ``/projects/{project_id}``. OpenAPI, and the
+    #: clients that are generated from it, show this name. The parameter of
+    #: the endpoint methods is still ``id``, so an override of
+    #: ``get_one_endpoint(self, id)`` keeps working. Each route of the view
+    #: with a parameter ``id: IDType`` reads the path parameter with this
+    #: name. Its path can say ``{id}`` or the name itself.
+    id_param: ClassVar[str] = "id"
     #: What a list route does with a query key that it does not read.
     #: ``"forbid"`` (the default) rejects the request with 422, so a typo in
     #: a filter key does not return more rows than the client asked for.
@@ -951,7 +970,7 @@ class BaseRestView(
         the view's model, not another table, and it runs no query, so define
         it with ``def``, also on an async view.
         """
-        return _primary_key_criterion(self.model, id)
+        return _primary_key_criterion(self.model, id, type(self).id_param)
 
     def not_found(self, id: Any) -> Exception:
         """The exception for an id that names no row: a 404 by default, such
@@ -1404,6 +1423,7 @@ class BaseRestView(
         # dependency reads them rather than a FastAPI query model, which
         # collapses next to any other query parameter (see
         # :func:`_list_params_dependency`).
+        _check_id_param(cls)
         params_model = _list_params_schema(cls)
         list_params = Annotated[
             params_model, fastapi.Depends(_list_params_dependency(params_model))

@@ -98,8 +98,9 @@ class ProjectTaskView(fr.AsyncRestView):
 
 - `prefix` contains `{project_id}`, so every route of the view is under a
   project. Name the path parameter after the parent, as here. The item routes
-  already use `{id}`, and FastAPI raises an error for a second `{id}` when you
-  register the view.
+  already use `{id}`, and a second `{id}` raises an error when you register the
+  view. To give the id of the task a name too, such as `{task_id}`, see
+  [Change the name of the id in the path](#id-param).
 - `project_from_path` reads `project_id` from the path. FastAPI checks that it
   is an integer, and OpenAPI lists it on every route. The function returns
   `404` when the project does not exist or when `ProjectView` hides it.

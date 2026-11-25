@@ -141,15 +141,63 @@ untyped path such as `@fr.get("/{id}")`, and annotate its `id` parameter as
 `int`; see
 [Replace an endpoint method](#replace-endpoint-method).
 
-The item routes use the name `id` in the path. An existing API can use another
-name, such as `{user_id}`. The URLs are the same, but OpenAPI and the clients that
-are generated from it show the name. To keep that name, replace each item endpoint,
-and `put` on a React Admin view, with a path such as `@fr.get("/{user_id:int}")` and
-a parameter `user_id: int`. With the converter, a wrong value still answers `404`.
-
 OpenAPI does not allow two paths that differ only in the names of their
 parameters. So `/{id}` next to `/{user_id}` on one view raises an error when you
-register the view. Use the same name in both paths.
+register the view. Use the same name in both paths, or set
+[`id_param`](#id-param).
+:::
+
+(id-param)=
+### Change the name of the id in the path
+
+The item routes read the id from a path parameter with the name `id`, as in
+`GET /users/{id}`. OpenAPI, and the clients that are generated from it, show
+this name. To use another name, set
+{attr}`id_param <fastapi_restly.views.BaseRestView.id_param>`:
+
+```python
+@fr.include_view(app)
+class UserView(fr.AsyncRestView):
+    prefix = "/users"
+    model = User
+    id_param = "user_id"
+```
+
+The item routes are now `GET`, `PATCH` and `DELETE /users/{user_id}`. The
+URLs stay the same. Only the name in OpenAPI changes.
+
+:::{admonition} Details
+:class: details
+
+The endpoint methods keep their parameter `id`. So an override such as
+`get_one_endpoint(self, id: IDType)` keeps working, and `where_id(self, id)`
+still gets the id.
+
+The setting also renames the id in the `PUT` route of a React Admin view, and in
+each route of your own with a parameter `id` annotated
+{data}`IDType <fastapi_restly.views.IDType>`. The path of such a route can say
+`{id}` or `{user_id}`; both read the id:
+
+```python
+from fastapi_restly.views import IDType
+
+
+@fr.include_view(app)
+class UserView(fr.AsyncRestView):
+    prefix = "/users"
+    model = User
+    id_param = "user_id"
+
+    @fr.get("/{id}/stats")
+    async def stats(self, id: IDType) -> dict[str, int]:
+        return {"id": id}
+```
+
+OpenAPI shows this route as `GET /users/{user_id}/stats`.
+
+The prefix of a [nested view](nested_routes.md) can have a parameter of its
+own, such as `{project_id}`. Give `id_param` another name, or the view raises
+an error when you register it.
 :::
 
 (view-request-steps)=
@@ -307,6 +355,7 @@ whole view:
 | Fixed fields in the responses | [`schema`](#write-or-generate) |
 | Other fields on create or update | [`create_schema`, `update_schema`](#explicit-write-schemas) |
 | The type of `{id}` in the path | [`id_type`](#id-type) |
+| The name of `{id}` in the path | [`id_param`](#id-param) |
 | Fewer routes | [`delete_endpoint = None`](#leave-out-routes) |
 | Hide rows from every read | [`scope`](#view-scope) |
 | Pages of the list | [`pagination`](#list-pagination) |

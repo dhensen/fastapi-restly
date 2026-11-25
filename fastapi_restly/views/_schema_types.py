@@ -8,6 +8,7 @@ gets its own types. A setting of the view can hold a :class:`SchemaType` too.
 """
 
 import inspect
+import re
 import threading
 import types
 from contextvars import ContextVar
@@ -23,6 +24,7 @@ from typing import (
     get_origin,
 )
 
+import fastapi.params
 from sqlalchemy import inspect as sa_inspect
 
 from ..exc import RestlyConfigurationError
@@ -196,6 +198,36 @@ def _is_view_id_param(endpoint: Callable) -> bool:
     return annotation is not None and _is_id_type(annotation, endpoint)
 
 
+def _view_id_param(view_cls: type) -> str:
+    """The name of the id in the path: :attr:`~fastapi_restly.views.BaseRestView.id_param`."""
+    return getattr(view_cls, "id_param", "id")
+
+
+def _reads_view_id(endpoint: Callable, path: str, view_cls: type) -> bool:
+    """Whether the parameter ``id: IDType`` of a route reads the view's id from
+    ``path``. The path says ``{id}``, or the name in ``id_param``."""
+    if not _is_view_id_param(endpoint):
+        return False
+    names = {"id", _view_id_param(view_cls)}
+    return any(found in names for found in re.findall(r"\{(\w+)", path))
+
+
+def _path_with_view_id(path: str, view_cls: type) -> str:
+    """``path`` with the name in ``id_param`` in place of ``{id}``."""
+    return re.sub(r"\{id(?=[:}])", "{" + _view_id_param(view_cls), path)
+
+
+def _with_path_alias(annotation: Any, alias: str) -> Any:
+    """``annotation`` with ``Path(alias=alias)``, so that the parameter ``id``
+    reads the path parameter ``alias``. Pydantic merges the ``Path(...)`` that
+    the annotation has already, such as ``Path(ge=1)``, with the new one, so
+    its options stay. A ``Path`` with an alias of its own stays as it is."""
+    metadata = get_args(annotation)[1:] if get_origin(annotation) is Annotated else ()
+    if any(isinstance(m, fastapi.params.Path) and m.alias for m in metadata):
+        return annotation
+    return Annotated[annotation, fastapi.Path(alias=alias)]
+
+
 #: The view's id type: :attr:`~fastapi_restly.views.BaseRestView.id_type`,
 #: else the type of the model's primary key. A path parameter with this type
 #: gets the view's path converter, as the CRUD item routes do: ``{id:int}``
@@ -238,6 +270,9 @@ def _fill_schema_types(func: Callable, view_cls: type, list_params: Any) -> None
     # copies a registered parent's filled-in signature onto a subclass's copy.
     written = inspect.get_annotations(func)
     sig = inspect.signature(func)
+    path = func._api_route_args[0]  # type: ignore[attr-defined]
+    id_param = _view_id_param(view_cls)
+    renames_id = id_param != "id" and _reads_view_id(func, path, view_cls)
     changed = False
     params = []
     for param in sig.parameters.values():
@@ -245,6 +280,8 @@ def _fill_schema_types(func: Callable, view_cls: type, list_params: Any) -> None
             annotation = list_params
         elif param.name in written:
             annotation = _with_schema_types(written[param.name], func, view_cls)
+            if param.name == "id" and renames_id:
+                annotation = _with_path_alias(annotation, id_param)
         else:
             annotation = param.annotation
         changed = changed or annotation is not param.annotation
